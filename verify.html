@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Verify a secret resolution</title>
+	<style>
+		body {
+			margin: 0 auto;
+			max-width: 600px;
+			padding: 0 24px 48px 24px;
+			font-size: 16px;
+		}
+
+		form {
+			margin-bottom: 24px;
+		}
+
+		label {
+			display: block;
+			margin-bottom: 1em;
+		}
+
+		input {
+			max-width: 400px;
+			width: calc(90% - 3ch);
+			font-size: inherit;
+		}
+
+		.result {
+			display: none;
+			padding: 24px;
+			text-align: center;
+		}
+
+		#pass {
+			background-color: #d1ffd1;
+			outline: 2px solid green;
+		}
+
+		#fail {
+			background-color: #ffd7d7;
+			outline: 2px solid red;
+		}
+	</style>
+</head>
+<body>
+	<h1>Verify a secret resolution</h1>
+	<form id='form'>
+		<label>Expected hash <input type="text" autocomplete="off" required id="expectedHash"></label>
+		<label>Secret key <input type="text" autocomplete="off" required id="keyHex"></label>
+		<label>Resolution <input type="text" autocomplete="off" required id="message"></label>
+		<button>verify</button>
+	</form>
+
+	<div class="result" id="pass">Verification passed!</div>
+	<div class="result" id="fail">Verification failed :(</div>
+
+	<script>
+		const $ = document.querySelector.bind(document)
+
+		const hash = window.location.hash
+		if (hash.length === 25) {
+			$('#expectedHash').value = hash.slice(1)
+		}
+
+		$('#form').addEventListener('submit', async function(event) {
+			event.preventDefault()
+
+			// clear these so that no results appear if we crash
+			$('#pass').style.display = 'none'
+			$('#fail').style.display = 'none'
+
+			const expectedHash = $('#expectedHash').value.trim()
+			const keyHex = $('#keyHex').value.trim()
+			const message = $('#message').value
+
+			const messageTrimmed = message.trim()
+			const messageWithoutNumber = messageTrimmed.replace(/^\d\. /, '')
+
+			const pass = (
+				await verify(expectedHash, keyHex, message) ||
+				await verify(expectedHash, keyHex, messageTrimmed) ||
+				await verify(expectedHash, keyHex, messageWithoutNumber)
+			)
+
+			if (pass) {
+				$('#pass').style.display = 'block'
+				$('#fail').style.display = 'none'
+			} else {
+				$('#pass').style.display = 'none'
+				$('#fail').style.display = 'block'
+			}
+		})
+
+		async function verify(expectedHash, keyHex, message) {
+			const algorithm = { name: 'HMAC', hash: 'SHA-256' }
+			const enc = new TextEncoder()
+			const key = await crypto.subtle.importKey('raw', enc.encode(keyHex), algorithm, false, ['sign'])
+			const hmac = await crypto.subtle.sign(algorithm, key, enc.encode(message))
+
+			const hmacHex = toHex(new Uint8Array(hmac)).slice(0, 24)
+			return hmacHex === expectedHash
+		}
+
+		function toHex(buf) {
+			return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('')
+		}
+	</script>
+</body>
+</html>

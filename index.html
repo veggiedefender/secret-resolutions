@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Secret Resolutions</title>
+	<style>
+	body {
+		font-size: 16px;
+		margin: 0 auto;
+		max-width: 600px;
+		padding: 0 24px 48px 24px;
+	}
+
+	label {
+		display: block;
+		margin-bottom: 1em;
+	}
+
+	input {
+		font-size: inherit;
+		max-width: 400px;
+		width: calc(90% - 3ch);
+	}
+
+	textarea {
+		width: 100%;
+		white-space: pre;
+	}
+
+	#outputs {
+		display: none;
+	}
+	</style>
+</head>
+<body>
+	<h1>Secret Resolutions</h1>
+
+	<p>It feels good to announce your goals — almost as good as it feels to actually achieve them. The <a href="https://journals.sagepub.com/doi/full/10.1111/j.1467-9280.2009.02336.x">research</a> is clear: <strong>to keep your resolutions, keep them to yourself.</strong>
+	<p>But if you must talk about them, then consider publishing cryptographic hashes of your resolutions instead. A hash is a “one-way” function that scrambles its input in a way that is difficult to reverse, but easy for a friend to verify once you tell them the original input.</p>
+
+	<details>
+		<summary>Example</summary>
+		<p>Suppose my resolution is “go to the gym”. I can enter it in this page, which will generate a random key like <code>fc78a780d7f57717</code>. Next, it will pass both my resolution and the key through a hash function, which mixes them together to produce the final value <code>93330a3c647a232c8de166b6</code>. I can share this hash with my friends.</p>
+		<p>Once I accomplish my goal, I can reveal the key and the contents of my resolution. My friends can then run the hash function themselves in order to check that it produces the same value as the hash that I shared in the beginning of the year. You can try this out by plugging those values into the <a href="https://jse.li/secret-resolutions/verify#93330a3c647a232c8de166b6">verifier</a>.</p>
+	</details>
+
+	<form id="form">
+		<details>
+			<summary>Details for nerds</summary>
+			<p>Instead of a plain hash function, I’m using HMAC-SHA256, truncated to the first 12 bytes (24 hex digits) so that five resolutions can fit comfortably in a tweet. A keyed hash makes it harder to brute-force short messages, and means that even if two people enter the same message, they will come up with different outputs. Keys are 8 bytes by default to keep them small and tidy, but if you have dark secrets, then you can increase their length:</p>
+			<label>Key size (bytes): <input type="number" value="8" min="8" name="keySize" pattern="\d*" inputmode="numeric" style="width: auto"></label>
+		</details>
+
+		<p>All computations are performed locally on your device, and will not be sent anywhere.</p>
+
+		<label>1. <input type="text" name="1" maxlength="140" autocomplete="off" required></label>
+		<label>2. <input type="text" name="2" maxlength="140" autocomplete="off"></label>
+		<label>3. <input type="text" name="3" maxlength="140" autocomplete="off"></label>
+		<label>4. <input type="text" name="4" maxlength="140" autocomplete="off"></label>
+		<label>5. <input type="text" name="5" maxlength="140" autocomplete="off"></label>
+		<button>submit</button>
+	</form>
+
+	<section id="outputs">
+		<p>Hashes of your resolutions. You can send these to your friends:</p>
+		<textarea id="hashes" readonly rows="7"></textarea>
+		<button id='copyHashes'>copy</button>
+		<button id='tweetHashes'>tweet</button>
+
+		<p>Your resolutions, along with the secret keys and links for verification. Keep these safe in your notes app:</p>
+		<textarea id="inputs" readonly rows="14"></textarea>
+		<button id='copyInputs'>copy</button>
+	</section>
+
+	<script>
+		const $ = document.querySelector.bind(document)
+
+		$('#form').addEventListener('submit', async function (event) {
+			event.preventDefault()
+			const formData = new FormData(event.target)
+
+			const keySize = parseInt(formData.get('keySize'))
+			const messages = ['1', '2', '3', '4', '5']
+				.map((name) => formData.get(name).trim())
+				.filter((message) => message.length > 0)
+
+			const outputs = await Promise.all(messages.map(message => hash(message, keySize)))
+			
+			const hashesText = outputs.map(({ hmacHex }, i) => `${i + 1}. ${hmacHex}`).join('\n')
+			$('#hashes').value = hashesText
+			$('#copyHashes').onclick = () => copyToClipboard(hashesText)
+
+			const tweetText = `This year I’m keeping my new year’s resolutions secret, but these are their hashes:\n\n` + hashesText + '\n\n' + `(computed by https://jse.li/secret-resolutions)`
+			const tweetLink = `https://twitter.com/intent/tweet/?text=${encodeURIComponent(tweetText)}`
+			$('#tweetHashes').onclick = () => window.open(tweetLink, '_blank')
+
+			const inputsText = outputs.map(({ hmacHex, message, keyHex }, i) => `${i + 1}. ${message}\nSecret key: ${keyHex}\nVerify at https://jse.li/secret-resolutions/verify#${hmacHex}`).join('\n\n')
+			$('#inputs').value = inputsText
+			$('#copyInputs').onclick = () => copyToClipboard(inputsText)
+
+			$('#outputs').style.display = 'block'
+		})
+
+		async function hash(message, keySize) {
+			const keyHex = generateKey(keySize)
+
+			const algorithm = { name: 'HMAC', hash: 'SHA-256' }
+			const enc = new TextEncoder()
+			const key = await crypto.subtle.importKey('raw', enc.encode(keyHex), algorithm, false, ['sign'])
+			const hmac = await crypto.subtle.sign(algorithm, key, enc.encode(message))
+
+			const hmacHex = toHex(new Uint8Array(hmac)).slice(0, 24)
+			return { message, keyHex, hmacHex }
+		}
+
+		function generateKey(size) {
+			return toHex(crypto.getRandomValues(new Uint8Array(size)))
+		}
+
+		function toHex(buf) {
+			return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('')
+		}
+
+		async function copyToClipboard(text) {
+			if (navigator.clipboard) {
+				return await navigator.clipboard.writeText(text)
+			}
+
+			const textarea = document.createElement('textarea')
+			textarea.value = text
+			textarea.style.top = '-999999px'
+			textarea.style.left = '-999999px'
+			textarea.style.position = 'fixed'
+			document.body.appendChild(textarea)
+			textarea.focus()
+			textarea.select()
+
+			try {
+				document.execCommand('copy')
+			} catch (err) {}
+
+			document.body.removeChild(textarea)
+		}
+	</script>
+</body>
+</html>
